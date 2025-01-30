@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import time
 
 # Funkcja do znalezienia jasnych punktów w obrazie
 def find_bright_spots(image, threshold=0.99):
@@ -23,8 +24,8 @@ def move_points(points, shift_x, shift_y):
 def main():
 
     # Ustawienia kamer
-    face_camera = cv2.VideoCapture(1)  # Kamera patrząca na twarz
-    light_camera = cv2.VideoCapture(0)  # Kamera patrząca na szybę
+    face_camera = cv2.VideoCapture(0)  # Kamera patrząca na twarz
+    light_camera = cv2.VideoCapture(2)  # Kamera patrząca na szybę
 
     if not face_camera.isOpened() or not light_camera.isOpened():
         print("Nie udało się otworzyć jednej z kamer.")
@@ -32,6 +33,9 @@ def main():
 
     # Załadowanie klasyfikatora twarzy
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+    fade_start_time = None  # Czas rozpoczęcia zanikania
+    fade_duration = 1.0   # Czas trwania zanikania w sekundach
 
     while True:
         # Czytaj obrazy z obu kamer
@@ -64,13 +68,24 @@ def main():
             # Przesuń jasne punkty na obrazie światła
             moved_bright_spots = move_points(light_bright_spots, shift_x, shift_y)
 
-            # Rysowanie przesuniętych jasnych punktów i przyciemnianie ich na obrazie światła
+            fade_start_time = time.time()  # Resetujemy czas zanikania
+            avg_brightness = np.mean(cv2.cvtColor(light_image, cv2.COLOR_BGR2GRAY)) / 255.0 #srednia jasnosc pikseli na obrazie
+            alpha = 0.9 - (0.15 * avg_brightness)  # Zaciemnienie od 90% do 75% w zależności od jasności otoczenia (jasniejsze otoczenie -> mniejsza nieprzezroczystoc, zeby nie bylo duzych kontrastow)
+
+        # stopniowe zanikania zaciemnienia
+        if fade_start_time is not None:
+            elapsed_time = time.time() - fade_start_time
+            alpha = max(0, alpha * (1 - elapsed_time / fade_duration))  # Nieprzezroczystość maleje do 0 w czasie fade_duration
+                
+            overlay = light_image.copy()
+
+             # Rysowanie przesuniętych jasnych punktów i przyciemnianie ich na kopii obrazu światła
             for spot in moved_bright_spots:
                 if 0 <= spot[1] < light_image.shape[1] and 0 <= spot[0] < light_image.shape[0]:
-                    # Zaznacz przesunięty punkt
-                    cv2.circle(light_image, (spot[1], spot[0]), 10, (0, 0, 255), -1)  # Czerwony okrąg
-                    # Przyciemnij punkt
-                    cv2.circle(light_image, (spot[1], spot[0]), 10, (0, 0, 0), -1)  # Czarny okrąg
+                    cv2.circle(overlay, (spot[1], spot[0]), 10, (0, 0, 0), -1)  # Czarny okrąg
+                
+            # Nakładanie zaciemnienia(overlay) na oryginalny obraz
+            cv2.addWeighted(overlay, alpha, light_image, 1 - alpha, 0, light_image)
 
             # Dodanie prostokąta wokół twarzy
             cv2.rectangle(face_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
